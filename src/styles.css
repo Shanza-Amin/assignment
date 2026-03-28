@@ -79,6 +79,11 @@ h1 {
   cursor: pointer;
 }
 
+.refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(220px, 0.8fr);
@@ -138,6 +143,13 @@ h1 {
 .summary-card strong {
   font-size: 2rem;
   line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.summary-loading {
+  font-size: 2rem;
+  line-height: 1;
+  color: #91a0b8;
   letter-spacing: -0.03em;
 }
 

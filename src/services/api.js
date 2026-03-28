@@ -1,8 +1,8 @@
 const GRAPHQL_ENDPOINT = 'https://release-current.starhunter.software/Api/graphql';
 const AUTH_TOKEN = '5a9bf82f-2a4e-43bb-89b6-d83459db4390';
 
-const PROJECT_CANDIDATES_QUERY = `
-  query RecruiterDashboardProjectCandidates {
+const DASHBOARD_QUERY = `
+  query RecruiterDashboardData {
     projectCandidates {
       id
       status
@@ -10,27 +10,19 @@ const PROJECT_CANDIDATES_QUERY = `
         name
       }
     }
-  }
-`;
-
-const PROJECTS_QUERY = `
-  query RecruiterDashboardProjects {
     projects {
       id
       name
     }
-  }
-`;
-
-const CANDIDATES_QUERY = `
-  query RecruiterDashboardCandidates {
     candidates {
       id
     }
   }
 `;
 
-async function fetchGraphQL(query) {
+async function fetchGraphQL(query, options = {}) {
+  const { signal } = options;
+
   try {
     const response = await fetch(GRAPHQL_ENDPOINT, {
       method: 'POST',
@@ -39,6 +31,7 @@ async function fetchGraphQL(query) {
         Authorization: `Bearer ${AUTH_TOKEN}`,
       },
       body: JSON.stringify({ query }),
+      signal,
     });
 
     if (!response.ok) {
@@ -68,14 +61,19 @@ async function fetchGraphQL(query) {
       };
     }
 
-    const graphQLError =
-      payload.errors?.map((error) => error.message).filter(Boolean).join(' ') || null;
-
     return {
       data: payload.data ?? null,
-      error: graphQLError ? 'Some records could not be fetched from the API.' : null,
+      errors: Array.isArray(payload.errors) ? payload.errors : [],
+      error:
+        Array.isArray(payload.errors) && payload.errors.length > 0
+          ? 'Some records could not be fetched from the API.'
+          : null,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw error;
+    }
+
     return {
       data: null,
       error: 'A network error interrupted the request.',
@@ -83,47 +81,66 @@ async function fetchGraphQL(query) {
   }
 }
 
-export async function fetchProjectCandidates() {
-  const result = await fetchGraphQL(PROJECT_CANDIDATES_QUERY);
-  const items = result.data?.projectCandidates;
-
-  return {
-    data: Array.isArray(items)
-      ? items.map((item) => ({
-          id: String(item.id ?? ''),
-          status: item.status || 'UNKNOWN',
-          projectName: item.project?.name || 'Unnamed project',
-        }))
-      : [],
-    error: result.error,
-  };
+function normalizeProjectCandidates(items) {
+  return Array.isArray(items)
+    ? items.map((item) => ({
+        id: String(item.id ?? ''),
+        status: item.status || 'UNKNOWN',
+        projectName: item.project?.name || 'Unnamed project',
+      }))
+    : [];
 }
 
-export async function fetchProjects() {
-  const result = await fetchGraphQL(PROJECTS_QUERY);
-  const items = result.data?.projects;
-
-  return {
-    data: Array.isArray(items)
-      ? items.map((project) => ({
-          id: String(project.id ?? ''),
-          name: project.name || 'Unnamed project',
-        }))
-      : [],
-    error: result.error,
-  };
+function normalizeProjects(items) {
+  return Array.isArray(items)
+    ? items.map((project) => ({
+        id: String(project.id ?? ''),
+        name: project.name || 'Unnamed project',
+      }))
+    : [];
 }
 
-export async function fetchCandidates() {
-  const result = await fetchGraphQL(CANDIDATES_QUERY);
-  const items = result.data?.candidates;
+function normalizeCandidates(items) {
+  return Array.isArray(items)
+    ? items.map((candidate) => ({
+        id: String(candidate.id ?? ''),
+      }))
+    : [];
+}
+
+function hasErrorForPath(errors, pathName) {
+  return errors.some((error) => Array.isArray(error.path) && error.path[0] === pathName);
+}
+
+export async function fetchDashboardData(options = {}) {
+  const result = await fetchGraphQL(DASHBOARD_QUERY, options);
+  const errors = result.errors || [];
+  const data = result.data || {};
+  const requestFailed = !result.data && Boolean(result.error);
 
   return {
-    data: Array.isArray(items)
-      ? items.map((candidate) => ({
-          id: String(candidate.id ?? ''),
-        }))
-      : [],
-    error: result.error,
+    projectCandidates: {
+      data: normalizeProjectCandidates(data.projectCandidates),
+      error:
+        requestFailed || (result.error && hasErrorForPath(errors, 'projectCandidates'))
+          ? 'Project candidate data is temporarily unavailable.'
+          : '',
+    },
+    projects: {
+      data: normalizeProjects(data.projects),
+      error:
+        requestFailed || (result.error && hasErrorForPath(errors, 'projects'))
+          ? 'Project data is temporarily unavailable.'
+          : '',
+    },
+    candidates: {
+      data: normalizeCandidates(data.candidates),
+      error:
+        requestFailed || (result.error && hasErrorForPath(errors, 'candidates'))
+          ? 'Candidate data is temporarily unavailable.'
+          : '',
+    },
+    requestError:
+      !result.data && result.error ? 'The dashboard data could not be loaded right now.' : '',
   };
 }

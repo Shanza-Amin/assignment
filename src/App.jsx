@@ -5,21 +5,42 @@ import Summary from './components/Summary.jsx';
 import Table from './components/Table.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { useDebounce } from './hooks/useDebounce.js';
-import { fetchCandidates, fetchProjectCandidates, fetchProjects } from './services/api.js';
+import { fetchDashboardData } from './services/api.js';
 
 const PAGE_SIZE = 10;
+const EMPTY_DATASET_STATE = {
+  data: [],
+  loading: true,
+  error: '',
+  hasLoaded: false,
+};
+
+function beginDatasetLoad(previousState) {
+  return {
+    ...previousState,
+    loading: true,
+    error: '',
+  };
+}
+
+function resolveDatasetState(previousState, nextValue) {
+  const nextData = Array.isArray(nextValue.data) ? nextValue.data : [];
+  const nextError = nextValue.error || '';
+  const shouldKeepPreviousData =
+    nextError && nextData.length === 0 && previousState.data.length > 0;
+
+  return {
+    data: shouldKeepPreviousData ? previousState.data : nextData,
+    loading: false,
+    error: nextError && nextData.length === 0 ? nextError : '',
+    hasLoaded: previousState.hasLoaded || nextData.length > 0 || !nextError,
+  };
+}
 
 function App() {
-  const [projectCandidates, setProjectCandidates] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [candidates, setCandidates] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [datasetErrors, setDatasetErrors] = useState({
-    projectCandidates: '',
-    projects: '',
-    candidates: '',
-  });
+  const [projectCandidatesState, setProjectCandidatesState] = useState(EMPTY_DATASET_STATE);
+  const [projectsState, setProjectsState] = useState(EMPTY_DATASET_STATE);
+  const [candidatesState, setCandidatesState] = useState(EMPTY_DATASET_STATE);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sortField, setSortField] = useState('projectName');
@@ -31,98 +52,75 @@ function App() {
   const debouncedSearchTerm = useDebounce(searchTerm, 400);
 
   useEffect(() => {
+    const abortController = new AbortController();
+
     async function loadDashboardData() {
       const requestId = latestRequestRef.current + 1;
       latestRequestRef.current = requestId;
 
-      setLoading(true);
-      setDatasetErrors({
-        projectCandidates: '',
-        projects: '',
-        candidates: '',
+      setProjectCandidatesState(beginDatasetLoad);
+      setProjectsState(beginDatasetLoad);
+      setCandidatesState(beginDatasetLoad);
+
+      const dashboardData = await fetchDashboardData({
+        signal: abortController.signal,
       });
 
-      const results = await Promise.allSettled([
-        fetchProjectCandidates(),
-        fetchProjects(),
-        fetchCandidates(),
-      ]);
-
-      if (latestRequestRef.current !== requestId) {
+      if (abortController.signal.aborted || latestRequestRef.current !== requestId) {
         return;
       }
 
-      const [projectCandidatesResult, projectsResult, candidatesResult] = results;
-
-      function resolveDataset(result, emptyMessage, setter) {
-        if (result.status === 'rejected') {
-          setter((currentValue) => currentValue);
-          return emptyMessage;
-        }
-
-        const nextData = Array.isArray(result.value.data) ? result.value.data : [];
-        const nextError = result.value.error || '';
-
-        setter((currentValue) => {
-          const shouldPreserveCurrentData =
-            nextError && nextData.length === 0 && currentValue.length > 0;
-
-          return shouldPreserveCurrentData ? currentValue : nextData;
-        });
-
-        return nextError ? emptyMessage : '';
-      }
-
-      const nextDatasetErrors = {
-        projectCandidates: resolveDataset(
-          projectCandidatesResult,
-          'Project candidate data is temporarily unavailable.',
-          setProjectCandidates,
-        ),
-        projects: resolveDataset(
-          projectsResult,
-          'Project data is temporarily unavailable.',
-          setProjects,
-        ),
-        candidates: resolveDataset(
-          candidatesResult,
-          'Candidate data is temporarily unavailable.',
-          setCandidates,
-        ),
-      };
-
-      setDatasetErrors(nextDatasetErrors);
-      const shouldShowGlobalError =
-        Boolean(nextDatasetErrors.projectCandidates) &&
-        Boolean(nextDatasetErrors.projects) &&
-        Boolean(nextDatasetErrors.candidates);
-
-      setError(
-        shouldShowGlobalError ? 'The dashboard data could not be loaded right now.' : '',
+      setProjectCandidatesState((currentValue) =>
+        resolveDatasetState(currentValue, dashboardData.projectCandidates),
       );
-      setLoading(false);
+      setProjectsState((currentValue) =>
+        resolveDatasetState(currentValue, dashboardData.projects),
+      );
+      setCandidatesState((currentValue) =>
+        resolveDatasetState(currentValue, dashboardData.candidates),
+      );
     }
 
     loadDashboardData();
+
+    return () => {
+      abortController.abort();
+    };
   }, [reloadToken]);
 
   const statuses = useMemo(() => {
-    return ['ALL', ...new Set(projectCandidates.map((item) => item.status).filter(Boolean))];
-  }, [projectCandidates]);
+    return [
+      'ALL',
+      ...new Set(projectCandidatesState.data.map((item) => item.status).filter(Boolean)),
+    ];
+  }, [projectCandidatesState.data]);
 
   const statusCounts = useMemo(() => {
-    return projectCandidates.reduce((counts, item) => {
+    return projectCandidatesState.data.reduce((counts, item) => {
       const key = item.status || 'UNKNOWN';
       counts[key] = (counts[key] || 0) + 1;
       return counts;
     }, {});
-  }, [projectCandidates]);
+  }, [projectCandidatesState.data]);
+
+  const globalError = useMemo(() => {
+    const datasetStates = [projectCandidatesState, projectsState, candidatesState];
+
+    const allDatasetsFailed = datasetStates.every(
+      (datasetState) => datasetState.error && datasetState.data.length === 0,
+    );
+
+    return allDatasetsFailed ? 'The dashboard data could not be loaded right now.' : '';
+  }, [projectCandidatesState, projectsState, candidatesState]);
+
+  const isRefreshing =
+    projectCandidatesState.loading || projectsState.loading || candidatesState.loading;
 
   const filteredAndSortedRows = useMemo(() => {
     // Filter first, then sort, so pagination always operates on the final visible dataset.
     const normalizedSearch = debouncedSearchTerm.trim().toLowerCase();
 
-    const filteredRows = projectCandidates.filter((row) => {
+    const filteredRows = projectCandidatesState.data.filter((row) => {
       const matchesStatus =
         statusFilter === 'ALL' || row.status.toLowerCase() === statusFilter.toLowerCase();
 
@@ -145,7 +143,7 @@ function App() {
       const comparison = leftValue > rightValue ? 1 : -1;
       return sortDirection === 'asc' ? comparison : comparison * -1;
     });
-  }, [projectCandidates, debouncedSearchTerm, statusFilter, sortField, sortDirection]);
+  }, [projectCandidatesState.data, debouncedSearchTerm, statusFilter, sortField, sortDirection]);
 
   useEffect(() => {
     // Jump back to the first page whenever the visible dataset definition changes.
@@ -194,16 +192,21 @@ function App() {
             type="button"
             className="refresh-button"
             onClick={() => setReloadToken((value) => value + 1)}
+            disabled={isRefreshing}
           >
-            Refresh data
+            {isRefreshing ? 'Refreshing...' : 'Refresh data'}
           </button>
         </div>
 
         <Summary
-          totalProjects={projects.length}
-          totalProjectCandidates={projectCandidates.length}
-          totalCandidates={candidates.length}
+          totalProjects={projectsState.data.length}
+          totalProjectCandidates={projectCandidatesState.data.length}
+          totalCandidates={candidatesState.data.length}
+          projectCandidatesLoading={projectCandidatesState.loading}
+          projectsLoading={projectsState.loading}
+          candidatesLoading={candidatesState.loading}
           statusCounts={statusCounts}
+          statusLoading={projectCandidatesState.loading}
         />
 
         <Toolbar
@@ -214,14 +217,14 @@ function App() {
           statuses={statuses}
         />
 
-        {loading ? (
-          <Loader label="Loading dashboard data" />
+        {projectCandidatesState.loading && projectCandidatesState.data.length === 0 ? (
+          <Loader label="Loading candidate data" />
         ) : (
           <>
-            {error ? (
+            {globalError ? (
               <div className="state-card state-card--error">
                 <strong>Some data could not be loaded cleanly.</strong>
-                <span>{error}</span>
+                <span>{globalError}</span>
                 <div>
                   <button
                     type="button"
@@ -239,6 +242,15 @@ function App() {
               <strong>{currentPage}</strong> of <strong>{totalPages}</strong> from{' '}
               <strong>{filteredAndSortedRows.length}</strong> matching candidates
             </div>
+
+            {projectCandidatesState.error &&
+            projectCandidatesState.data.length === 0 &&
+            !globalError ? (
+              <div className="state-card state-card--error">
+                <strong>Candidate data could not be loaded.</strong>
+                <span>{projectCandidatesState.error}</span>
+              </div>
+            ) : null}
 
             <Table
               rows={paginatedRows}
