@@ -45,4 +45,11 @@ It provides a clear overview of project candidates, projects, and candidate data
 
 ---
 
-## 📂 Project Structure
+## ⚙️ Setup & Run
+
+```bash
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
