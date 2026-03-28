@@ -1,103 +1,126 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Pagination from './components/Pagination.jsx';
+import Loader from './components/Loader.jsx';
+import Summary from './components/Summary.jsx';
+import Table from './components/Table.jsx';
+import Toolbar from './components/Toolbar.jsx';
+import { useDebounce } from './hooks/useDebounce.js';
+import { fetchDashboardData } from './services/api.js';
 
-const GRAPHQL_ENDPOINT = 'https://release-current.starhunter.software/Api/graphql';
-const AUTH_TOKEN = '5a9bf82f-2a4e-43bb-89b6-d83459db4390';
+const PAGE_SIZE = 10;
+const EMPTY_DATASET_STATE = {
+  data: [],
+  loading: true,
+  error: '',
+  hasLoaded: false,
+};
 
-const PROJECT_CANDIDATES_QUERY = `
-  query RecruiterDashboardProjectCandidates {
-    projectCandidates {
-      id
-      status
-      project {
-        name
-      }
-    }
-  }
-`;
+function beginDatasetLoad(previousState) {
+  return {
+    ...previousState,
+    loading: true,
+    error: '',
+  };
+}
 
-async function fetchProjectCandidates() {
-  const response = await fetch(GRAPHQL_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${AUTH_TOKEN}`,
-    },
-    body: JSON.stringify({
-      query: PROJECT_CANDIDATES_QUERY,
-    }),
-  });
+function resolveDatasetState(previousState, nextValue) {
+  const nextData = Array.isArray(nextValue.data) ? nextValue.data : [];
+  const nextError = nextValue.error || '';
+  const shouldKeepPreviousData =
+    nextError && nextData.length === 0 && previousState.data.length > 0;
 
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}.`);
-  }
-
-  const payload = await response.json();
-
-  // GraphQL APIs can return HTTP 200 while still failing at the query layer.
-  if (payload.errors?.length) {
-    const message = payload.errors.map((error) => error.message).join(' | ');
-    throw new Error(message || 'GraphQL returned an unknown error.');
-  }
-
-  return (payload.data?.projectCandidates ?? []).map((item) => ({
-    id: String(item.id ?? ''),
-    status: item.status || 'UNKNOWN',
-    projectName: item.project?.name || 'Unnamed project',
-  }));
+  return {
+    data: shouldKeepPreviousData ? previousState.data : nextData,
+    loading: false,
+    error: nextError && nextData.length === 0 ? nextError : '',
+    hasLoaded: previousState.hasLoaded || nextData.length > 0 || !nextError,
+  };
 }
 
 function App() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [projectCandidatesState, setProjectCandidatesState] = useState(EMPTY_DATASET_STATE);
+  const [projectsState, setProjectsState] = useState(EMPTY_DATASET_STATE);
+  const [candidatesState, setCandidatesState] = useState(EMPTY_DATASET_STATE);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [sortField, setSortField] = useState('projectName');
+  const [sortDirection, setSortDirection] = useState('asc');
+  const [currentPage, setCurrentPage] = useState(1);
   const [reloadToken, setReloadToken] = useState(0);
+  const latestRequestRef = useRef(0);
+
+  const debouncedSearchTerm = useDebounce(searchTerm, 400);
 
   useEffect(() => {
-    let ignore = false;
+    const abortController = new AbortController();
 
-    async function loadProjectCandidates() {
-      setLoading(true);
-      setError('');
+    async function loadDashboardData() {
+      const requestId = latestRequestRef.current + 1;
+      latestRequestRef.current = requestId;
 
-      try {
-        const nextRows = await fetchProjectCandidates();
+      setProjectCandidatesState(beginDatasetLoad);
+      setProjectsState(beginDatasetLoad);
+      setCandidatesState(beginDatasetLoad);
 
-        if (!ignore) {
-          setRows(nextRows);
-        }
-      } catch (err) {
-        if (!ignore) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Something went wrong while loading candidates.',
-          );
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false);
-        }
+      const dashboardData = await fetchDashboardData({
+        signal: abortController.signal,
+      });
+
+      if (abortController.signal.aborted || latestRequestRef.current !== requestId) {
+        return;
       }
+
+      setProjectCandidatesState((currentValue) =>
+        resolveDatasetState(currentValue, dashboardData.projectCandidates),
+      );
+      setProjectsState((currentValue) =>
+        resolveDatasetState(currentValue, dashboardData.projects),
+      );
+      setCandidatesState((currentValue) =>
+        resolveDatasetState(currentValue, dashboardData.candidates),
+      );
     }
 
-    loadProjectCandidates();
+    loadDashboardData();
 
-    // Prevent state updates if the component unmounts during a slow request.
     return () => {
-      ignore = true;
+      abortController.abort();
     };
   }, [reloadToken]);
 
   const statuses = useMemo(() => {
-    return ['ALL', ...new Set(rows.map((row) => row.status).filter(Boolean))];
-  }, [rows]);
+    return [
+      'ALL',
+      ...new Set(projectCandidatesState.data.map((item) => item.status).filter(Boolean)),
+    ];
+  }, [projectCandidatesState.data]);
 
-  const filteredRows = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
+  const statusCounts = useMemo(() => {
+    return projectCandidatesState.data.reduce((counts, item) => {
+      const key = item.status || 'UNKNOWN';
+      counts[key] = (counts[key] || 0) + 1;
+      return counts;
+    }, {});
+  }, [projectCandidatesState.data]);
 
-    return rows.filter((row) => {
+  const globalError = useMemo(() => {
+    const datasetStates = [projectCandidatesState, projectsState, candidatesState];
+
+    const allDatasetsFailed = datasetStates.every(
+      (datasetState) => datasetState.error && datasetState.data.length === 0,
+    );
+
+    return allDatasetsFailed ? 'The dashboard data could not be loaded right now.' : '';
+  }, [projectCandidatesState, projectsState, candidatesState]);
+
+  const isRefreshing =
+    projectCandidatesState.loading || projectsState.loading || candidatesState.loading;
+
+  const filteredAndSortedRows = useMemo(() => {
+    // Filter first, then sort, so pagination always operates on the final visible dataset.
+    const normalizedSearch = debouncedSearchTerm.trim().toLowerCase();
+
+    const filteredRows = projectCandidatesState.data.filter((row) => {
       const matchesStatus =
         statusFilter === 'ALL' || row.status.toLowerCase() === statusFilter.toLowerCase();
 
@@ -108,7 +131,49 @@ function App() {
 
       return matchesStatus && matchesSearch;
     });
-  }, [rows, searchTerm, statusFilter]);
+
+    return [...filteredRows].sort((left, right) => {
+      const leftValue = (left[sortField] || '').toLowerCase();
+      const rightValue = (right[sortField] || '').toLowerCase();
+
+      if (leftValue === rightValue) {
+        return 0;
+      }
+
+      const comparison = leftValue > rightValue ? 1 : -1;
+      return sortDirection === 'asc' ? comparison : comparison * -1;
+    });
+  }, [projectCandidatesState.data, debouncedSearchTerm, statusFilter, sortField, sortDirection]);
+
+  useEffect(() => {
+    // Jump back to the first page whenever the visible dataset definition changes.
+    setCurrentPage(1);
+  }, [debouncedSearchTerm, statusFilter, sortField, sortDirection]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredAndSortedRows.length / PAGE_SIZE));
+  }, [filteredAndSortedRows.length]);
+
+  const paginatedRows = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return filteredAndSortedRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredAndSortedRows, currentPage]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  function handleSortFieldChange(nextField) {
+    if (sortField === nextField) {
+      setSortDirection((currentDirection) => (currentDirection === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+
+    setSortField(nextField);
+    setSortDirection('asc');
+  }
 
   return (
     <main className="page-shell">
@@ -118,89 +183,90 @@ function App() {
             <p className="eyebrow">Recruiter Dashboard</p>
             <h1>Project candidates overview</h1>
             <p className="hero-copy">
-              Live GraphQL data with lightweight search, status filtering, and resilient
-              error handling for unstable backend responses.
+              Real GraphQL data with defensive error handling, debounced search, sorting,
+              status insights, and lightweight client-side pagination.
             </p>
           </div>
+
           <button
             type="button"
             className="refresh-button"
-            onClick={() => setReloadToken((currentValue) => currentValue + 1)}
+            onClick={() => setReloadToken((value) => value + 1)}
+            disabled={isRefreshing}
           >
-            Refresh data
+            {isRefreshing ? 'Refreshing...' : 'Refresh data'}
           </button>
         </div>
 
-        <div className="toolbar">
-          <label className="field">
-            <span>Search by ID or project</span>
-            <input
-              type="search"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Try 123 or Frontend Hire"
-            />
-          </label>
+        <Summary
+          totalProjects={projectsState.data.length}
+          totalProjectCandidates={projectCandidatesState.data.length}
+          totalCandidates={candidatesState.data.length}
+          projectCandidatesLoading={projectCandidatesState.loading}
+          projectsLoading={projectsState.loading}
+          candidatesLoading={candidatesState.loading}
+          statusCounts={statusCounts}
+          statusLoading={projectCandidatesState.loading}
+        />
 
-          <label className="field">
-            <span>Status</span>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-            >
-              {statuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <Toolbar
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          statuses={statuses}
+        />
 
-        {loading ? (
-          <div className="state-card">Loading candidates...</div>
-        ) : error ? (
-          <div className="state-card state-card--error">
-            <strong>Unable to load data.</strong>
-            <span>{error}</span>
-          </div>
+        {projectCandidatesState.loading && projectCandidatesState.data.length === 0 ? (
+          <Loader label="Loading candidate data" />
         ) : (
           <>
+            {globalError ? (
+              <div className="state-card state-card--error">
+                <strong>Some data could not be loaded cleanly.</strong>
+                <span>{globalError}</span>
+                <div>
+                  <button
+                    type="button"
+                    className="retry-button"
+                    onClick={() => setReloadToken((value) => value + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="results-meta">
-              Showing <strong>{filteredRows.length}</strong> of <strong>{rows.length}</strong>{' '}
-              candidates
+              Showing <strong>{paginatedRows.length}</strong> rows on page{' '}
+              <strong>{currentPage}</strong> of <strong>{totalPages}</strong> from{' '}
+              <strong>{filteredAndSortedRows.length}</strong> matching candidates
             </div>
 
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Candidate ID</th>
-                    <th>Project</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRows.length > 0 ? (
-                    filteredRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.id}</td>
-                        <td>{row.projectName}</td>
-                        <td>
-                          <span className="status-pill">{row.status}</span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="3" className="empty-state">
-                        No candidates match the current search or filter.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            {projectCandidatesState.error &&
+            projectCandidatesState.data.length === 0 &&
+            !globalError ? (
+              <div className="state-card state-card--error">
+                <strong>Candidate data could not be loaded.</strong>
+                <span>{projectCandidatesState.error}</span>
+              </div>
+            ) : null}
+
+            <Table
+              rows={paginatedRows}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSortChange={handleSortFieldChange}
+            />
+
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={PAGE_SIZE}
+              totalItems={filteredAndSortedRows.length}
+              onPrevious={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              onNext={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            />
           </>
         )}
       </section>
