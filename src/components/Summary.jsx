@@ -3,7 +3,6 @@ function Summary({
   totalProjectCandidates,
   totalCandidates,
   statusCounts,
-  topProjects,
 }) {
   const statusEntries = Object.entries(statusCounts);
 
@@ -35,21 +34,6 @@ function Summary({
             ))
           ) : (
             <span className="muted-text">No candidate data available.</span>
-          )}
-        </div>
-      </article>
-
-      <article className="summary-card summary-card--wide">
-        <span className="summary-label">Top projects</span>
-        <div className="project-list">
-          {topProjects.length > 0 ? (
-            topProjects.map((project) => (
-              <span key={project.id} className="project-list-item">
-                {project.name}
-              </span>
-            ))
-          ) : (
-            <span className="muted-text">Projects could not be loaded.</span>
           )}
         </div>
       </article>

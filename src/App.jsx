@@ -92,16 +92,19 @@ function App() {
       };
 
       setDatasetErrors(nextDatasetErrors);
+      const shouldShowGlobalError =
+        Boolean(nextDatasetErrors.projectCandidates) &&
+        Boolean(nextDatasetErrors.projects) &&
+        Boolean(nextDatasetErrors.candidates);
+
+      setError(
+        shouldShowGlobalError ? 'The dashboard data could not be loaded right now.' : '',
+      );
       setLoading(false);
     }
 
     loadDashboardData();
   }, [reloadToken]);
-
-  useEffect(() => {
-    const nextErrors = Object.values(datasetErrors).filter(Boolean).join(' ');
-    setError(nextErrors);
-  }, [datasetErrors]);
 
   const statuses = useMemo(() => {
     return ['ALL', ...new Set(projectCandidates.map((item) => item.status).filter(Boolean))];
@@ -114,10 +117,6 @@ function App() {
       return counts;
     }, {});
   }, [projectCandidates]);
-
-  const topProjects = useMemo(() => {
-    return projects.slice(0, 5);
-  }, [projects]);
 
   const filteredAndSortedRows = useMemo(() => {
     // Filter first, then sort, so pagination always operates on the final visible dataset.
@@ -205,7 +204,6 @@ function App() {
           totalProjectCandidates={projectCandidates.length}
           totalCandidates={candidates.length}
           statusCounts={statusCounts}
-          topProjects={topProjects}
         />
 
         <Toolbar

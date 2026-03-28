@@ -118,28 +118,32 @@ h1 {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 28px;
 }
 
 .summary-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 22px;
-  border: 1px solid #d9e2ef;
-  border-radius: 18px;
-  background: #ffffff;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid rgba(217, 226, 239, 0.95);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, #f8fbff 100%);
+  box-shadow: 0 14px 34px rgba(20, 33, 61, 0.06);
 }
 
 .summary-card strong {
-  font-size: 1.8rem;
+  font-size: 2rem;
   line-height: 1;
+  letter-spacing: -0.03em;
 }
 
 .summary-card--wide {
-  min-height: 120px;
+  grid-column: 1 / -1;
+  min-height: 126px;
 }
 
 .summary-label {
@@ -150,21 +154,20 @@ h1 {
   text-transform: uppercase;
 }
 
-.status-summary-list,
-.project-list {
+.status-summary-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.status-summary-item,
-.project-list-item {
+.status-summary-item {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 8px 12px;
-  background: #f2f6fb;
+  padding: 9px 13px;
+  background: #eef4ff;
   color: #31415f;
+  font-weight: 600;
 }
 
 .muted-text {
@@ -174,8 +177,9 @@ h1 {
 .table-wrap {
   overflow: auto;
   border: 1px solid #d9e2ef;
-  border-radius: 18px;
+  border-radius: 22px;
   background: #ffffff;
+  box-shadow: 0 16px 36px rgba(20, 33, 61, 0.05);
 }
 
 table {
@@ -239,9 +243,10 @@ tbody tr:last-child td {
   gap: 10px;
   padding: 20px;
   border: 1px solid #d9e2ef;
-  border-radius: 18px;
+  border-radius: 20px;
   background: #ffffff;
   margin-bottom: 16px;
+  box-shadow: 0 12px 24px rgba(20, 33, 61, 0.05);
 }
 
 .state-card--error {
@@ -271,7 +276,7 @@ tbody tr:last-child td {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  margin-top: 18px;
+  margin-top: 22px;
 }
 
 .pagination-controls {
@@ -360,6 +365,10 @@ tbody tr:last-child td {
 
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .summary-card--wide {
+    grid-column: auto;
   }
 
   .pagination {
