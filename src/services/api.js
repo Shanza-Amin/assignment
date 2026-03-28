@@ -22,46 +22,108 @@ const PROJECTS_QUERY = `
   }
 `;
 
+const CANDIDATES_QUERY = `
+  query RecruiterDashboardCandidates {
+    candidates {
+      id
+    }
+  }
+`;
+
 async function fetchGraphQL(query) {
-  const response = await fetch(GRAPHQL_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${AUTH_TOKEN}`,
-    },
-    body: JSON.stringify({ query }),
-  });
+  try {
+    const response = await fetch(GRAPHQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${AUTH_TOKEN}`,
+      },
+      body: JSON.stringify({ query }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}.`);
+    if (!response.ok) {
+      return {
+        data: null,
+        error: 'The server could not be reached successfully.',
+      };
+    }
+
+    const rawBody = await response.text();
+
+    if (!rawBody.trim()) {
+      return {
+        data: null,
+        error: 'The server returned an empty response.',
+      };
+    }
+
+    let payload;
+
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      return {
+        data: null,
+        error: 'The server returned malformed data.',
+      };
+    }
+
+    const graphQLError =
+      payload.errors?.map((error) => error.message).filter(Boolean).join(' ') || null;
+
+    return {
+      data: payload.data ?? null,
+      error: graphQLError ? 'Some records could not be fetched from the API.' : null,
+    };
+  } catch {
+    return {
+      data: null,
+      error: 'A network error interrupted the request.',
+    };
   }
-
-  const payload = await response.json();
-
-  // The API can still fail even when the HTTP layer succeeds.
-  if (payload.errors?.length) {
-    const message = payload.errors.map((error) => error.message).join(' | ');
-    throw new Error(message || 'GraphQL returned an unknown error.');
-  }
-
-  return payload.data || {};
 }
 
 export async function fetchProjectCandidates() {
-  const data = await fetchGraphQL(PROJECT_CANDIDATES_QUERY);
+  const result = await fetchGraphQL(PROJECT_CANDIDATES_QUERY);
+  const items = result.data?.projectCandidates;
 
-  return (data.projectCandidates ?? []).map((item) => ({
-    id: String(item.id ?? ''),
-    status: item.status || 'UNKNOWN',
-    projectName: item.project?.name || 'Unnamed project',
-  }));
+  return {
+    data: Array.isArray(items)
+      ? items.map((item) => ({
+          id: String(item.id ?? ''),
+          status: item.status || 'UNKNOWN',
+          projectName: item.project?.name || 'Unnamed project',
+        }))
+      : [],
+    error: result.error,
+  };
 }
 
 export async function fetchProjects() {
-  const data = await fetchGraphQL(PROJECTS_QUERY);
+  const result = await fetchGraphQL(PROJECTS_QUERY);
+  const items = result.data?.projects;
 
-  return (data.projects ?? []).map((project) => ({
-    id: String(project.id ?? ''),
-    name: project.name || 'Unnamed project',
-  }));
+  return {
+    data: Array.isArray(items)
+      ? items.map((project) => ({
+          id: String(project.id ?? ''),
+          name: project.name || 'Unnamed project',
+        }))
+      : [],
+    error: result.error,
+  };
+}
+
+export async function fetchCandidates() {
+  const result = await fetchGraphQL(CANDIDATES_QUERY);
+  const items = result.data?.candidates;
+
+  return {
+    data: Array.isArray(items)
+      ? items.map((candidate) => ({
+          id: String(candidate.id ?? ''),
+        }))
+      : [],
+    error: result.error,
+  };
 }

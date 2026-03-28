@@ -1,16 +1,27 @@
-function Summary({ totalProjects, totalCandidates, statusCounts, topProjects }) {
+function Summary({
+  totalProjects,
+  totalProjectCandidates,
+  totalCandidates,
+  statusCounts,
+  topProjects,
+}) {
   const statusEntries = Object.entries(statusCounts);
 
   return (
     <section className="summary-grid">
       <article className="summary-card">
         <span className="summary-label">Project candidates</span>
-        <strong>{totalCandidates}</strong>
+        <strong>{totalProjectCandidates}</strong>
       </article>
 
       <article className="summary-card">
         <span className="summary-label">Projects</span>
         <strong>{totalProjects}</strong>
+      </article>
+
+      <article className="summary-card">
+        <span className="summary-label">Candidates</span>
+        <strong>{totalCandidates}</strong>
       </article>
 
       <article className="summary-card summary-card--wide">
@@ -23,7 +34,7 @@ function Summary({ totalProjects, totalCandidates, statusCounts, topProjects }) 
               </span>
             ))
           ) : (
-            <span className="muted-text">No status data available.</span>
+            <span className="muted-text">No candidate data available.</span>
           )}
         </div>
       </article>

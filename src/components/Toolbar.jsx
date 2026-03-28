@@ -1,13 +1,4 @@
-function Toolbar({
-  searchTerm,
-  onSearchChange,
-  statusFilter,
-  onStatusFilterChange,
-  statuses,
-  sortField,
-  sortDirection,
-  onSortFieldChange,
-}) {
+function Toolbar({ searchTerm, onSearchChange, statusFilter, onStatusFilterChange, statuses }) {
   return (
     <div className="toolbar">
       <label className="field">
@@ -33,22 +24,6 @@ function Toolbar({
           ))}
         </select>
       </label>
-
-      <label className="field">
-        <span>Sort by</span>
-        <select value={sortField} onChange={(event) => onSortFieldChange(event.target.value)}>
-          <option value="projectName">Project name</option>
-          <option value="status">Status</option>
-        </select>
-      </label>
-
-      <button
-        type="button"
-        className="sort-direction-button"
-        onClick={() => onSortFieldChange(sortField)}
-      >
-        Direction: {sortDirection === 'asc' ? 'Ascending' : 'Descending'}
-      </button>
     </div>
   );
 }

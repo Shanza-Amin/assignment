@@ -1,71 +1,107 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Pagination from './components/Pagination.jsx';
+import Loader from './components/Loader.jsx';
 import Summary from './components/Summary.jsx';
 import Table from './components/Table.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { useDebounce } from './hooks/useDebounce.js';
-import { fetchProjectCandidates, fetchProjects } from './services/api.js';
+import { fetchCandidates, fetchProjectCandidates, fetchProjects } from './services/api.js';
 
 const PAGE_SIZE = 10;
 
 function App() {
   const [projectCandidates, setProjectCandidates] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [datasetErrors, setDatasetErrors] = useState({
+    projectCandidates: '',
+    projects: '',
+    candidates: '',
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sortField, setSortField] = useState('projectName');
   const [sortDirection, setSortDirection] = useState('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const [reloadToken, setReloadToken] = useState(0);
+  const latestRequestRef = useRef(0);
 
   const debouncedSearchTerm = useDebounce(searchTerm, 400);
 
   useEffect(() => {
-    let ignore = false;
-
     async function loadDashboardData() {
-      setLoading(true);
-      setError('');
+      const requestId = latestRequestRef.current + 1;
+      latestRequestRef.current = requestId;
 
-      const [projectCandidatesResult, projectsResult] = await Promise.allSettled([
+      setLoading(true);
+      setDatasetErrors({
+        projectCandidates: '',
+        projects: '',
+        candidates: '',
+      });
+
+      const results = await Promise.allSettled([
         fetchProjectCandidates(),
         fetchProjects(),
+        fetchCandidates(),
       ]);
 
-      if (ignore) {
+      if (latestRequestRef.current !== requestId) {
         return;
       }
 
-      let nextError = '';
+      const [projectCandidatesResult, projectsResult, candidatesResult] = results;
 
-      if (projectCandidatesResult.status === 'fulfilled') {
-        setProjectCandidates(projectCandidatesResult.value);
-      } else {
-        setProjectCandidates([]);
-        nextError = projectCandidatesResult.reason?.message || 'Failed to load project candidates.';
+      function resolveDataset(result, emptyMessage, setter) {
+        if (result.status === 'rejected') {
+          setter((currentValue) => currentValue);
+          return emptyMessage;
+        }
+
+        const nextData = Array.isArray(result.value.data) ? result.value.data : [];
+        const nextError = result.value.error || '';
+
+        setter((currentValue) => {
+          const shouldPreserveCurrentData =
+            nextError && nextData.length === 0 && currentValue.length > 0;
+
+          return shouldPreserveCurrentData ? currentValue : nextData;
+        });
+
+        return nextError ? emptyMessage : '';
       }
 
-      if (projectsResult.status === 'fulfilled') {
-        setProjects(projectsResult.value);
-      } else {
-        setProjects([]);
-        nextError = nextError
-          ? `${nextError} Projects could not be loaded either.`
-          : projectsResult.reason?.message || 'Failed to load projects.';
-      }
+      const nextDatasetErrors = {
+        projectCandidates: resolveDataset(
+          projectCandidatesResult,
+          'Project candidate data is temporarily unavailable.',
+          setProjectCandidates,
+        ),
+        projects: resolveDataset(
+          projectsResult,
+          'Project data is temporarily unavailable.',
+          setProjects,
+        ),
+        candidates: resolveDataset(
+          candidatesResult,
+          'Candidate data is temporarily unavailable.',
+          setCandidates,
+        ),
+      };
 
-      setError(nextError);
+      setDatasetErrors(nextDatasetErrors);
       setLoading(false);
     }
 
     loadDashboardData();
-
-    return () => {
-      ignore = true;
-    };
   }, [reloadToken]);
+
+  useEffect(() => {
+    const nextErrors = Object.values(datasetErrors).filter(Boolean).join(' ');
+    setError(nextErrors);
+  }, [datasetErrors]);
 
   const statuses = useMemo(() => {
     return ['ALL', ...new Set(projectCandidates.map((item) => item.status).filter(Boolean))];
@@ -166,7 +202,8 @@ function App() {
 
         <Summary
           totalProjects={projects.length}
-          totalCandidates={projectCandidates.length}
+          totalProjectCandidates={projectCandidates.length}
+          totalCandidates={candidates.length}
           statusCounts={statusCounts}
           topProjects={topProjects}
         />
@@ -177,19 +214,25 @@ function App() {
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
           statuses={statuses}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          onSortFieldChange={handleSortFieldChange}
         />
 
         {loading ? (
-          <div className="state-card">Loading dashboard data...</div>
+          <Loader label="Loading dashboard data" />
         ) : (
           <>
             {error ? (
               <div className="state-card state-card--error">
                 <strong>Some data could not be loaded cleanly.</strong>
                 <span>{error}</span>
+                <div>
+                  <button
+                    type="button"
+                    className="retry-button"
+                    onClick={() => setReloadToken((value) => value + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -199,7 +242,12 @@ function App() {
               <strong>{filteredAndSortedRows.length}</strong> matching candidates
             </div>
 
-            <Table rows={paginatedRows} />
+            <Table
+              rows={paginatedRows}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSortChange={handleSortFieldChange}
+            />
 
             <Pagination
               currentPage={currentPage}

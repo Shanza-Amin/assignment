@@ -12,15 +12,42 @@ function getStatusClassName(status) {
   return 'status-pill status-pill--unknown';
 }
 
-function Table({ rows }) {
+function getSortArrow(column, sortField, sortDirection) {
+  if (column !== sortField) {
+    return '↕';
+  }
+
+  return sortDirection === 'asc' ? '↑' : '↓';
+}
+
+function Table({ rows, sortField, sortDirection, onSortChange }) {
+  const columns = [
+    { key: 'id', label: 'Candidate ID' },
+    { key: 'projectName', label: 'Project' },
+    { key: 'status', label: 'Status' },
+  ];
+
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Candidate ID</th>
-            <th>Project</th>
-            <th>Status</th>
+            {columns.map((column) => (
+              <th key={column.key}>
+                <button
+                  type="button"
+                  className={
+                    column.key === sortField
+                      ? 'table-sort-button table-sort-button--active'
+                      : 'table-sort-button'
+                  }
+                  onClick={() => onSortChange(column.key)}
+                >
+                  <span>{column.label}</span>
+                  <span className="sort-arrow">{getSortArrow(column.key, sortField, sortDirection)}</span>
+                </button>
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
