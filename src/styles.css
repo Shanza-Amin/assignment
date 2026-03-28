@@ -81,9 +81,10 @@ h1 {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(220px, 0.8fr);
+  grid-template-columns: minmax(0, 1.6fr) repeat(2, minmax(180px, 0.7fr)) auto;
   gap: 16px;
   margin-bottom: 20px;
+  align-items: end;
 }
 
 .field {
@@ -113,6 +114,61 @@ h1 {
 .results-meta {
   margin-bottom: 12px;
   color: #52627f;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid #d9e2ef;
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.summary-card strong {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.summary-card--wide {
+  min-height: 120px;
+}
+
+.summary-label {
+  color: #60708d;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-summary-list,
+.project-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.status-summary-item,
+.project-list-item {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #f2f6fb;
+  color: #31415f;
+}
+
+.muted-text {
+  color: #6e7d97;
 }
 
 .table-wrap {
@@ -154,11 +210,24 @@ tbody tr:last-child td {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  background: #e6f0ff;
-  color: #0f4ea8;
   padding: 6px 10px;
   font-size: 0.88rem;
   font-weight: 700;
+}
+
+.status-pill--active {
+  background: #e8f7ee;
+  color: #1c7c43;
+}
+
+.status-pill--pending {
+  background: #fff1df;
+  color: #b26400;
+}
+
+.status-pill--unknown {
+  background: #edf1f5;
+  color: #59697f;
 }
 
 .state-card,
@@ -187,6 +256,43 @@ tbody tr:last-child td {
   padding: 28px 18px;
 }
 
+.sort-direction-button,
+.pagination button {
+  border: none;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #123a72;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+.sort-direction-button {
+  white-space: nowrap;
+}
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-meta {
+  color: #52627f;
+}
+
+.pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 @media (max-width: 760px) {
   .page-shell {
     padding: 24px 14px;
@@ -203,5 +309,14 @@ tbody tr:last-child td {
 
   .toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pagination {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

@@ -1,103 +1,93 @@
 import { useEffect, useMemo, useState } from 'react';
+import Pagination from './components/Pagination.jsx';
+import Summary from './components/Summary.jsx';
+import Table from './components/Table.jsx';
+import Toolbar from './components/Toolbar.jsx';
+import { useDebounce } from './hooks/useDebounce.js';
+import { fetchProjectCandidates, fetchProjects } from './services/api.js';
 
-const GRAPHQL_ENDPOINT = 'https://release-current.starhunter.software/Api/graphql';
-const AUTH_TOKEN = '5a9bf82f-2a4e-43bb-89b6-d83459db4390';
-
-const PROJECT_CANDIDATES_QUERY = `
-  query RecruiterDashboardProjectCandidates {
-    projectCandidates {
-      id
-      status
-      project {
-        name
-      }
-    }
-  }
-`;
-
-async function fetchProjectCandidates() {
-  const response = await fetch(GRAPHQL_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${AUTH_TOKEN}`,
-    },
-    body: JSON.stringify({
-      query: PROJECT_CANDIDATES_QUERY,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}.`);
-  }
-
-  const payload = await response.json();
-
-  // GraphQL APIs can return HTTP 200 while still failing at the query layer.
-  if (payload.errors?.length) {
-    const message = payload.errors.map((error) => error.message).join(' | ');
-    throw new Error(message || 'GraphQL returned an unknown error.');
-  }
-
-  return (payload.data?.projectCandidates ?? []).map((item) => ({
-    id: String(item.id ?? ''),
-    status: item.status || 'UNKNOWN',
-    projectName: item.project?.name || 'Unnamed project',
-  }));
-}
+const PAGE_SIZE = 10;
 
 function App() {
-  const [rows, setRows] = useState([]);
+  const [projectCandidates, setProjectCandidates] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [sortField, setSortField] = useState('projectName');
+  const [sortDirection, setSortDirection] = useState('asc');
+  const [currentPage, setCurrentPage] = useState(1);
   const [reloadToken, setReloadToken] = useState(0);
+
+  const debouncedSearchTerm = useDebounce(searchTerm, 400);
 
   useEffect(() => {
     let ignore = false;
 
-    async function loadProjectCandidates() {
+    async function loadDashboardData() {
       setLoading(true);
       setError('');
 
-      try {
-        const nextRows = await fetchProjectCandidates();
+      const [projectCandidatesResult, projectsResult] = await Promise.allSettled([
+        fetchProjectCandidates(),
+        fetchProjects(),
+      ]);
 
-        if (!ignore) {
-          setRows(nextRows);
-        }
-      } catch (err) {
-        if (!ignore) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Something went wrong while loading candidates.',
-          );
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false);
-        }
+      if (ignore) {
+        return;
       }
+
+      let nextError = '';
+
+      if (projectCandidatesResult.status === 'fulfilled') {
+        setProjectCandidates(projectCandidatesResult.value);
+      } else {
+        setProjectCandidates([]);
+        nextError = projectCandidatesResult.reason?.message || 'Failed to load project candidates.';
+      }
+
+      if (projectsResult.status === 'fulfilled') {
+        setProjects(projectsResult.value);
+      } else {
+        setProjects([]);
+        nextError = nextError
+          ? `${nextError} Projects could not be loaded either.`
+          : projectsResult.reason?.message || 'Failed to load projects.';
+      }
+
+      setError(nextError);
+      setLoading(false);
     }
 
-    loadProjectCandidates();
+    loadDashboardData();
 
-    // Prevent state updates if the component unmounts during a slow request.
     return () => {
       ignore = true;
     };
   }, [reloadToken]);
 
   const statuses = useMemo(() => {
-    return ['ALL', ...new Set(rows.map((row) => row.status).filter(Boolean))];
-  }, [rows]);
+    return ['ALL', ...new Set(projectCandidates.map((item) => item.status).filter(Boolean))];
+  }, [projectCandidates]);
 
-  const filteredRows = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
+  const statusCounts = useMemo(() => {
+    return projectCandidates.reduce((counts, item) => {
+      const key = item.status || 'UNKNOWN';
+      counts[key] = (counts[key] || 0) + 1;
+      return counts;
+    }, {});
+  }, [projectCandidates]);
 
-    return rows.filter((row) => {
+  const topProjects = useMemo(() => {
+    return projects.slice(0, 5);
+  }, [projects]);
+
+  const filteredAndSortedRows = useMemo(() => {
+    // Filter first, then sort, so pagination always operates on the final visible dataset.
+    const normalizedSearch = debouncedSearchTerm.trim().toLowerCase();
+
+    const filteredRows = projectCandidates.filter((row) => {
       const matchesStatus =
         statusFilter === 'ALL' || row.status.toLowerCase() === statusFilter.toLowerCase();
 
@@ -108,7 +98,49 @@ function App() {
 
       return matchesStatus && matchesSearch;
     });
-  }, [rows, searchTerm, statusFilter]);
+
+    return [...filteredRows].sort((left, right) => {
+      const leftValue = (left[sortField] || '').toLowerCase();
+      const rightValue = (right[sortField] || '').toLowerCase();
+
+      if (leftValue === rightValue) {
+        return 0;
+      }
+
+      const comparison = leftValue > rightValue ? 1 : -1;
+      return sortDirection === 'asc' ? comparison : comparison * -1;
+    });
+  }, [projectCandidates, debouncedSearchTerm, statusFilter, sortField, sortDirection]);
+
+  useEffect(() => {
+    // Jump back to the first page whenever the visible dataset definition changes.
+    setCurrentPage(1);
+  }, [debouncedSearchTerm, statusFilter, sortField, sortDirection]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredAndSortedRows.length / PAGE_SIZE));
+  }, [filteredAndSortedRows.length]);
+
+  const paginatedRows = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return filteredAndSortedRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredAndSortedRows, currentPage]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  function handleSortFieldChange(nextField) {
+    if (sortField === nextField) {
+      setSortDirection((currentDirection) => (currentDirection === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+
+    setSortField(nextField);
+    setSortDirection('asc');
+  }
 
   return (
     <main className="page-shell">
@@ -118,89 +150,65 @@ function App() {
             <p className="eyebrow">Recruiter Dashboard</p>
             <h1>Project candidates overview</h1>
             <p className="hero-copy">
-              Live GraphQL data with lightweight search, status filtering, and resilient
-              error handling for unstable backend responses.
+              Real GraphQL data with defensive error handling, debounced search, sorting,
+              status insights, and lightweight client-side pagination.
             </p>
           </div>
+
           <button
             type="button"
             className="refresh-button"
-            onClick={() => setReloadToken((currentValue) => currentValue + 1)}
+            onClick={() => setReloadToken((value) => value + 1)}
           >
             Refresh data
           </button>
         </div>
 
-        <div className="toolbar">
-          <label className="field">
-            <span>Search by ID or project</span>
-            <input
-              type="search"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Try 123 or Frontend Hire"
-            />
-          </label>
+        <Summary
+          totalProjects={projects.length}
+          totalCandidates={projectCandidates.length}
+          statusCounts={statusCounts}
+          topProjects={topProjects}
+        />
 
-          <label className="field">
-            <span>Status</span>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-            >
-              {statuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <Toolbar
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          statuses={statuses}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          onSortFieldChange={handleSortFieldChange}
+        />
 
         {loading ? (
-          <div className="state-card">Loading candidates...</div>
-        ) : error ? (
-          <div className="state-card state-card--error">
-            <strong>Unable to load data.</strong>
-            <span>{error}</span>
-          </div>
+          <div className="state-card">Loading dashboard data...</div>
         ) : (
           <>
+            {error ? (
+              <div className="state-card state-card--error">
+                <strong>Some data could not be loaded cleanly.</strong>
+                <span>{error}</span>
+              </div>
+            ) : null}
+
             <div className="results-meta">
-              Showing <strong>{filteredRows.length}</strong> of <strong>{rows.length}</strong>{' '}
-              candidates
+              Showing <strong>{paginatedRows.length}</strong> rows on page{' '}
+              <strong>{currentPage}</strong> of <strong>{totalPages}</strong> from{' '}
+              <strong>{filteredAndSortedRows.length}</strong> matching candidates
             </div>
 
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Candidate ID</th>
-                    <th>Project</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRows.length > 0 ? (
-                    filteredRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.id}</td>
-                        <td>{row.projectName}</td>
-                        <td>
-                          <span className="status-pill">{row.status}</span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="3" className="empty-state">
-                        No candidates match the current search or filter.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <Table rows={paginatedRows} />
+
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={PAGE_SIZE}
+              totalItems={filteredAndSortedRows.length}
+              onPrevious={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              onNext={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            />
           </>
         )}
       </section>
